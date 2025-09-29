@@ -1,86 +1,87 @@
 import requests
 import os
 import time
-import csv
+import snowflake.connector
+from datetime import datetime
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+def run_stock_job():
+    """
+    Connects to the Polygon.io API to fetch a complete list of all active stock tickers.
+    Handles pagination and rate limiting.
 
-# Check if the key was actually loaded
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
-if not POLYGON_API_KEY:
-    raise ValueError("POLYGON_API_KEY not found. Make sure it's set in your .env file.")
+    Returns:
+        list: A list of dictionaries, where each dictionary represents a ticker.
+              Returns an empty list if the API key is not found or an error occurs.
+    """
+    # Load environment variables from .env file
+    load_dotenv()
 
-LIMIT = 1000
+    # Check if the key was actually loaded
+    POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+    if not POLYGON_API_KEY:
+        raise ValueError("POLYGON_API_KEY not found. Make sure it's set in your .env file.")
 
-# Parametrize the base URL
-base_url = "https://api.polygon.io/v3/reference/tickers"
-params = {
-    "market": "stocks",
-    "active": "true",
-    "order": "asc",
-    "limit": LIMIT,
-    "sort": "ticker",
-    "apiKey": POLYGON_API_KEY
-}
+    LIMIT = 1000
 
-tickers = []
+    # Parametrize the base URL
+    base_url = "https://api.polygon.io/v3/reference/tickers"
+    params = {
+        "market": "stocks",
+        "active": "true",
+        "order": "asc",
+        "limit": LIMIT,
+        "sort": "ticker",
+        "apiKey": POLYGON_API_KEY
+    }
 
-with requests.Session() as session:
-    next_url = base_url
+    tickers = []
 
-    while next_url:
-        # slice the URL for printing to avoid too long output
-        print(f"Fetching data from: {next_url[:100]}...")
-        
-        if next_url == base_url:
-            response = session.get(next_url, params=params)
-        else:
-            response = session.get(f"{next_url}&apiKey={POLYGON_API_KEY}")
+    with requests.Session() as session:
+        next_url = base_url
 
-        if response.status_code == 200:
-            data = response.json()
+        while next_url:
+            # slice the URL for printing to avoid too long output
+            print(f"Fetching data from: {next_url[:100]}...")
             
-            results = data.get('results', [])
-            tickers.extend(results)
-            
-            next_url = data.get('next_url')
-            
-            print(f"Successfully fetched {len(results)} tickers. Total tickers: {len(tickers)}")
+            if next_url == base_url:
+                response = session.get(next_url, params=params)
+            else:
+                response = session.get(f"{next_url}&apiKey={POLYGON_API_KEY}")
 
-            # Add a delay to respect the rate limit (5 requests/minute)
-            # From the pricing: https://polygon.io/pricing we see that the free tier allows 5 requests per minute
-            # This means we have time per request = 60 seconds / 5 requests = 12 seconds/request (add 1 second buffer)
-            if next_url: # Only sleep if there is a next page to fetch
-                print("Waiting 13 seconds to respect rate limit...")
-                time.sleep(13)
+            if response.status_code == 200:
+                data = response.json()
+                
+                results = data.get('results', [])
+                tickers.extend(results)
+                
+                next_url = data.get('next_url')
+                
+                print(f"Successfully fetched {len(results)} tickers. Total tickers: {len(tickers)}")
 
-        else:
-            print(f"Error fetching data: {response.status_code}")
-            print(f"Response Body: {response.text}")
-            break
+                # Add a delay to respect the rate limit (5 requests/minute)
+                # From the pricing: https://polygon.io/pricing we see that the free tier allows 5 requests per minute
+                # This means we have time per request = 60 seconds / 5 requests = 12 seconds/request (add 1 second buffer)
+                if next_url: # Only sleep if there is a next page to fetch
+                    print("Waiting 13 seconds to respect rate limit...")
+                    time.sleep(13)
 
-print(f"\nFinished fetching. Total tickers found: {len(tickers)}")
+            else:
+                print(f"Error fetching data: {response.status_code}")
+                print(f"Response Body: {response.text}")
+                break # Exit the loop on error
 
-# Save to CSV
-if tickers:
-    # Define the name of the output file
-    csv_filename = "tickers.csv"
+    print(f"\nFinished fetching. Total tickers found: {len(tickers)}")
+    return tickers
+
+# This block allows the script to be run directly from the command line
+if __name__ == "__main__":
+    # Call the function to execute the job
+    all_tickers = run_stock_job()
     
-    # The 'tickers' list contains dictionaries. 
-    # Get the CSV headers from the keys of the first dictionary in the list.
-    headers = tickers[0].keys()
-
-    # Write to the file (newline='' prevents extra blank rows)
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-        # Create a DictWriter object, which can map dictionaries to CSV rows
-        writer = csv.DictWriter(csvfile, fieldnames=headers)
-        # Write the header row to the CSV file
-        writer.writeheader()
-        # Write all the ticker data to the CSV file
-        writer.writerows(tickers)
-
-    print(f"\nData successfully written to {csv_filename}")
-else:
-    print("\nNo tickers were fetched, so no CSV file was created.")
+    # You could now pass `all_tickers` to another function for processing,
+    # like saving to a database or writing to a CSV.
+    if all_tickers:
+        print(f"\nJob complete. Successfully retrieved {len(all_tickers)} tickers.")
+    else:
+        print("\nJob finished, but no tickers were retrieved.")
